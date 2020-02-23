@@ -4,6 +4,13 @@
  * @author Alexandre.Tortevois
  */
 
+/**
+ * TODO:
+ *   - Fix the message reading when we are in timeout mode: the new message is not detected by the select function
+ *   - Fix the detection when the client is disconnected (after 2 writes)
+ *   - Fix the detection when the client is reconnected (after 2 writes)
+*/
+
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -34,7 +41,7 @@ static int server_create(void) {
 
     // Create an endpoint for communication
     if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Unable to open the server socket");
+        printf("Unable to open the server socket: %s\n", strerror(errno));
         rc = -1;
         goto __error;
     }
@@ -45,7 +52,7 @@ static int server_create(void) {
     // Set socket to be nonblocking
     /*
     if (ioctl(*server_socket, FIONBIO, (char *) &on) < 0) {
-        perror("Unable to set `socket` to be nonblocking");
+        printf("Unable to set the server socket to be nonblocking: %s\n", strerror(errno));
         rc = -1;
         goto __error;
     }
@@ -58,7 +65,7 @@ static int server_create(void) {
 
     // Bind the newly created socket
     if (bind(server_socket, (const struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        perror("Unable to bind the server socket");
+        printf("Unable to bind the server socket: %s\n", strerror(errno));
         rc = -1;
         goto __error;
     }
@@ -116,7 +123,7 @@ static void *server_thread(void __attribute__((unused)) *p) {
 
     // Listen for connections on a socket
     if (listen(server_socket, 1) < 0) { // only one client
-        perror("Unable to listen the server socket");
+        printf("Unable to listen the server socket: %s\n", strerror(errno));
         goto __error;
     }
 
@@ -126,7 +133,7 @@ static void *server_thread(void __attribute__((unused)) *p) {
 
         // Accept a connection on a socket
         if ((client_socket = accept(server_socket, NULL, NULL)) < 0) {
-            perror("Unable to accept a client");
+            printf("Unable to accept a client: %s\n", strerror(errno));
             goto __error;
         }
 
@@ -146,7 +153,7 @@ static void *server_thread(void __attribute__((unused)) *p) {
 
             // Error
             if (activity < 0) {
-                perror("Failed to select");
+                printf("Failed to select: %s\n", strerror(errno));
                 goto __error; // exit(EXIT_FAILURE);
             }
 
@@ -164,7 +171,7 @@ static void *server_thread(void __attribute__((unused)) *p) {
             ssize_t msg_len = read(client_socket, buffer, sizeof(buffer) - 1);
 
             if (msg_len < 0) {
-                perror("Unable to read a message from the client socket");
+                printf("Unable to read a message from the client socket: %s\n", strerror(errno));
                 goto __error;
             }
 
@@ -202,7 +209,7 @@ static void *server_thread(void __attribute__((unused)) *p) {
         server_socket = -1;
     }
 
-    printf("End of thread `server`");
+    printf("End of the server thread\n");
     exit(EXIT_FAILURE); // pthread_exit(0);
 }
 
@@ -210,7 +217,7 @@ static int server_start(void) {
     int rc = 0;
     if ((rc = pthread_create(&thread_id, NULL, server_thread, NULL)) != 0) {
         rc = -1;
-        perror("Unable to create the Thread `server`: %s");
+        printf("Unable to create the server thread: %s\n", strerror(errno));
         goto __error;
     }
 
@@ -224,12 +231,12 @@ static void server_stop(void) {
     if (thread_id != -1) {
         pthread_cancel(thread_id);
         if (client_socket != -1) {
-            if(shutdown(client_socket, SHUT_RDWR) < 0) {
+            if (shutdown(client_socket, SHUT_RDWR) < 0) {
                 printf("Unable to close the client socket: %s\n", strerror(errno));
             }
         }
         if (server_socket != -1) {
-            if(shutdown(server_socket, SHUT_RDWR) < 0) {
+            if (shutdown(server_socket, SHUT_RDWR) < 0) {
                 printf("Unable to close the server socket: %s\n", strerror(errno));
             }
 
@@ -269,17 +276,17 @@ int main() {
     sig_action.sa_handler = sig_handler;
 
     if (sigaction(SIGSEGV, &sig_action, NULL) < 0) {
-        perror("Error: could not define sigaction SIGSEGV");
+        printf("Error: could not define sigaction SIGSEGV: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
     if (sigaction(SIGTERM, &sig_action, NULL) < 0) {
-        perror("Error: could not define sigaction SIGTERM");
+        printf("Error: could not define sigaction SIGTERM: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
     if (sigaction(SIGFPE, &sig_action, NULL) < 0) {
-        perror("Error: could not define sigaction SIGFPE");
+        printf("Error: could not define sigaction SIGFPE: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 

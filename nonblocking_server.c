@@ -4,13 +4,6 @@
  * @author Alexandre.Tortevois
  */
 
-/**
- * TODO:
- *   - Fix the message reading when we are in timeout mode: the new message is not detected by the select function
- *   - Fix the detection when the client is disconnected (after 2 writes)
- *   - Fix the detection when the client is reconnected (after 2 writes)
-*/
-
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -48,6 +41,9 @@ static int server_create(void) {
 
     // Allow address to be reused instantly
     setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+
+    // Allow to keep alive the connection
+    setsockopt(server_socket, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on));
 
     // Set socket to be nonblocking
     /*
@@ -139,17 +135,19 @@ static void *server_thread(void __attribute__((unused)) *p) {
 
         printf("New client incoming connection: %d\n", client_socket);
 
-        FD_ZERO(&set);
-        FD_SET(server_socket, &set);
-        FD_SET(client_socket, &set);
-        max_fd_set = MAX(server_socket, client_socket) + 1;
-
         while (isRunning) {
+            // Initialize fd_set
+            FD_ZERO(&set);
+            FD_SET(server_socket, &set);
+            FD_SET(client_socket, &set);
+            max_fd_set = MAX(server_socket, client_socket) + 1;
+
             // Initialize timeout
             timeout.tv_sec = 30; // 10 sec
             timeout.tv_usec = 0;
 
             activity = select(max_fd_set, &set, NULL, NULL, &timeout);
+            printf("activity is %d\n",activity);
 
             // Error
             if (activity < 0) {

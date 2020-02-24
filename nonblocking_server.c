@@ -1,5 +1,5 @@
 /**
- * @file server.c
+ * @file nonblocking_server.c
  * Compile command : gcc nonblocking_server.c -o server -lpthread
  * @author Alexandre.Tortevois
  */
@@ -22,7 +22,6 @@
 #define SERVER_SOCKET_PORT 1998
 #define BUFFER_MAX_SIZE 16*1024 // 16ko
 
-//static bool isRunning = true;
 volatile sig_atomic_t isRunning = true;
 static pthread_t thread_id = -1;
 static int server_socket = -1, client_socket = -1;
@@ -74,28 +73,29 @@ static int server_create(void) {
 
 static int write_to_client(void) {
     int rc = 0;
+
     // Build a response
     char time_str[10];
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
-    strftime(time_str, sizeof(time_str) - 1, "%H:%M:%S", t); // %d %m %Y -- %D %T
-
-    // strcpy(reply_buffer, "{}");
-    sprintf(reply_buffer, "It's %s\n", time_str);
+    strftime(time_str, sizeof(time_str) - 1, "%H:%M:%S", t);
+    sprintf(reply_buffer, "{\"payload\":\"%s\"}\n", time_str);
 
     unsigned int msg_len = strlen(reply_buffer);
     if (write(client_socket, reply_buffer, msg_len) != msg_len) {
-        printf("Error write #%d: %s\n", errno, strerror(errno));
         if (errno == EPIPE) {
             printf("Catch error EPIPE\n");
+            rc = 1;
+            goto __error;
+        } else {
+            printf("Error write #%d: %s\n", errno, strerror(errno));
             rc = -1;
             goto __error;
         }
-        // TODO
-        //exit(EXIT_FAILURE);
     }
 
     printf("Message send to the client: %s", reply_buffer);
+
     __error:
     return rc;
 }
@@ -103,7 +103,7 @@ static int write_to_client(void) {
 static void *server_thread(void __attribute__((unused)) *p) {
     fd_set set;
     int max_fd_set;
-    int activity;
+    int rc;
     struct timeval timeout;
 
     // Allow the thread to be canceled
@@ -124,15 +124,12 @@ static void *server_thread(void __attribute__((unused)) *p) {
     }
 
     while (isRunning) {
-
         printf("Waiting for a new client\n");
-
         // Accept a connection on a socket
         if ((client_socket = accept(server_socket, NULL, NULL)) < 0) {
             printf("Unable to accept a client: %s\n", strerror(errno));
             goto __error;
         }
-
         printf("New client incoming connection: %d\n", client_socket);
 
         while (isRunning) {
@@ -143,22 +140,28 @@ static void *server_thread(void __attribute__((unused)) *p) {
             max_fd_set = MAX(server_socket, client_socket) + 1;
 
             // Initialize timeout
-            timeout.tv_sec = 30; // 10 sec
+            timeout.tv_sec = 30; // 30 sec
             timeout.tv_usec = 0;
 
-            activity = select(max_fd_set, &set, NULL, NULL, &timeout);
-            printf("activity is %d\n",activity);
+            rc = select(max_fd_set, &set, NULL, NULL, &timeout);
+            // printf("activity is %d\n", activity);
 
             // Error
-            if (activity < 0) {
-                printf("Failed to select: %s\n", strerror(errno));
-                goto __error; // exit(EXIT_FAILURE);
+            if (rc < 0) {
+                printf("Select failed: %s\n", strerror(errno));
+                goto __error;
             }
 
             // Timeout
-            if (activity == 0) {
-                // If client is disconnected => break; else continue
-                if (write_to_client() < 0) break;
+            if (rc == 0) {
+                // Send a response to the client
+                rc = write_to_client();
+                // Error
+                if (rc < 0) goto __error;
+                // Client is disconnected => break;
+                if (rc > 0) break;
+
+                // Go back to the `select`
                 continue;
             }
 
@@ -186,29 +189,41 @@ static void *server_thread(void __attribute__((unused)) *p) {
             buffer[msg_len] = 0;
             printf("Message received from the client: %s\n", buffer);
 
-            // If client is disconnected => break;
-            if (write_to_client() < 0) break;
+            // Send a response to the client
+            rc = write_to_client();
+            // Error
+            if (rc < 0) goto __error;
+            // Client is disconnected => break;
+            if (rc > 0) break;
         }
 
         // Client is disconnected
         printf("Client is now disconnected\n");
-        close(client_socket);
+        if (close(client_socket) < 0) {
+            printf("Unable to close the client socket: %s\n", strerror(errno));
+            goto __error;
+        }
         client_socket = -1;
     }
 
     __error:
     if (client_socket != -1) {
-        close(client_socket);
+        if (close(client_socket) < 0) {
+            printf("Unable to close the client socket: %s\n", strerror(errno));
+        }
         client_socket = -1;
     }
 
     if (server_socket != -1) {
-        close(server_socket);
+        if (close(server_socket) < 0) {
+            printf("Unable to close the server socket: %s\n", strerror(errno));
+        }
         server_socket = -1;
     }
 
     printf("End of the server thread\n");
-    exit(EXIT_FAILURE); // pthread_exit(0);
+    kill(getppid(), SIGTERM);
+    // pthread_exit(0);
 }
 
 static int server_start(void) {
@@ -241,7 +256,7 @@ static void server_stop(void) {
         }
         pthread_join(thread_id, NULL);
     }
-    printf("Thread `server` stop\n");
+    printf("The server thread is stopped\n");
 }
 
 static void sig_handler(int sig) {
@@ -259,16 +274,13 @@ static void sig_handler(int sig) {
             break;
 
         default:
+            printf("Catch SIG %s\n", strsignal(sig));
             break;
     }
     exit(EXIT_FAILURE);
 }
 
-int main() {
-    // Callback before exit
-    atexit(server_stop);
-
-    // Define the callback for signals interception
+static void sig_intercept(void) {
     struct sigaction sig_action;
     memset(&sig_action, 0, sizeof(sig_action));
     sig_action.sa_handler = sig_handler;
@@ -287,6 +299,14 @@ int main() {
         printf("Error: could not define sigaction SIGFPE: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
+}
+
+int main() {
+    // Callback before exit
+    atexit(server_stop);
+
+    // Define signals interception
+    sig_intercept();
 
     if (server_start() < 0) {
         exit(EXIT_FAILURE);

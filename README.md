@@ -3,7 +3,7 @@ A simple TCP socket server in C with a Websocket Client/Server in Node.JS and a 
 
 # Getting Started
 
-Compile the non blocking server
+Compile the nonblocking server
 ```
 gcc nonblocking_server.c -o server -lpthread
 ```
@@ -21,7 +21,8 @@ node wss.js &
 ```
 
 Open the ws_client.html on your computer, then connect to the server IP with port 8888
-Send a message, it should respond with the time
+
+Send a message, it should respond with the current time (depends on your configuration)
 
 # Example
 

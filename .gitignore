@@ -1,6 +1,0 @@
-# Default ignored files
-/cmake-build-debug
-/.idea
-CMakeLists.txt
-thread_safe.c
-ibm_example.c

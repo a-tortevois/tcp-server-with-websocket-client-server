@@ -1,6 +1,8 @@
 # tcp-server-with-websocket-client-server
 A simple TCP socket server in C with a Websocket Client/Server in Node.JS and a final client in HTML/Javascript
 
+![Alt text](./stack-architecture.png?raw=true "Stack architecture")
+
 # Getting Started
 
 Compile the nonblocking server
